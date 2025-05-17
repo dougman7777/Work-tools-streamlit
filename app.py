@@ -16,7 +16,7 @@ if 'spaces' not in st.session_state:
         'Data Processing': {
             'type': 'tool',
             'description': 'Tools for processing different types of data',
-            'tools': ['CSV Processor', 'Text Analyzer', 'Wave Route Parser']
+            'tools': ['CSV Processor', 'Text Analyzer', 'Wave Route Parser', 'Fiber Sheath Parser']
         },
         'Medical Research': {
             'type': 'research',
@@ -82,6 +82,8 @@ def show_tool_space(space_name):
         show_text_analyzer()
     elif selected_tool == "Wave Route Parser":
         show_wave_route_parser()
+    elif selected_tool == "Fiber Sheath Parser":
+        fiber_sheath_parser()
 
 def show_research_space(space_name):
     st.subheader("Research Notes")
@@ -126,21 +128,16 @@ def show_text_analyzer():
 
 def parse_facility_id(line):
     """Parse a network facility ID into its components."""
-    # Regular expression to match the pattern: number /FIBERL/LOCATION1/LOCATION2
     match = re.search(r'(\d+)\s+(/FIBER\w+/[A-Z0-9]+/[A-Z0-9]+)', line)
     if not match:
         return None
 
     seq_num, facility = match.groups()
-
-    # Split facility into components
     parts = facility.split('/')
-    if len(parts) != 4:  # Should be ['', 'FIBERL', 'LOC1', 'LOC2']
+    if len(parts) != 4:
         return None
 
     _, fiber_type, loc1, loc2 = parts
-
-    # Extract location code (first 8 chars) and equipment suffix
     loc1_code = loc1[:8]
     loc1_suffix = loc1[8:]
     loc2_code = loc2[:8]
@@ -163,32 +160,23 @@ def parse_facility_id(line):
     }
 
 def detect_system_change(prev_segment, curr_segment):
-    """Detect if there's a system change between two segments."""
     if not prev_segment or not curr_segment:
         return False
-
-    # Check if geographical prefixes match but suffixes differ
     for loc in ['loc1', 'loc2']:
         prev_loc = prev_segment[loc]
         curr_loc = curr_segment[loc]
-
         if prev_loc['code'] == curr_loc['code'] and prev_loc['suffix'] != curr_loc['suffix']:
             return True
-
     return False
 
 def remove_duplicates(routes):
-    """Remove duplicate routes while preserving order."""
     seen = set()
     unique_routes = []
-
     for route in routes:
-        # Create a unique key for the route based on facility ID
         route_key = f"{route['seq_num']} {route['full_facility']}"
         if route_key not in seen:
             seen.add(route_key)
             unique_routes.append(route)
-
     return unique_routes
 
 def parse_wave_routes(input_data):
@@ -218,7 +206,6 @@ def parse_wave_routes(input_data):
     return unique_lines
 
 def build_wave_path(output1, start_loc):
-    # Helper functions remain the same
     def get_clli(loc):
         return loc[:8] if len(loc) >= 8 else loc
 
@@ -227,11 +214,8 @@ def build_wave_path(output1, start_loc):
             return loc[8:9]
         return ''
 
-    # Parse all routes into a list of dicts, both directions
     routes = []
-    # Store original unique routes for accurate counting
-    original_unique_routes = set(output1)  # This gives us the true count of input routes
-
+    original_unique_routes = set(output1)
     for line in output1:
         parts = line.split()
         if len(parts) < 2:
@@ -264,9 +248,8 @@ def build_wave_path(output1, start_loc):
     used_lines = set()
     final_routes = []
     system_changes = 0
-    original_routes_count = len(original_unique_routes)  # Use the actual count from input
+    original_routes_count = len(original_unique_routes)
 
-    # Rest of the function remains the same...
     start_loc = get_clli(start_loc.strip().upper())
     current_loc = None
     prev_suffix = None
@@ -287,20 +270,17 @@ def build_wave_path(output1, start_loc):
         for route in routes:
             if route['line'] in used_lines:
                 continue
-
             if route['loc1_clli'] == current_loc:
                 curr_suffix = get_suffix_type(route['loc1'])
                 if prev_suffix and curr_suffix and prev_suffix != curr_suffix:
                     final_routes.append('--- SYSTEM CHANGE ---')
                     system_changes += 1
-
                 final_routes.append(route['line'])
                 used_lines.add(route['line'])
                 current_loc = route['loc2_clli']
                 prev_suffix = get_suffix_type(route['loc2'])
                 found = True
                 break
-
         if not found:
             break
 
@@ -308,7 +288,7 @@ def build_wave_path(output1, start_loc):
     summary = f"Original Routes: {original_routes_count} | Final Routes: {final_routes_count} | System Changes: {system_changes}"
     output3 = [line for line in output1]
     return final_routes, output3, summary
-    
+
 def show_wave_route_parser():
     st.subheader("Wave Route Parser")
     st.markdown(
@@ -316,12 +296,10 @@ def show_wave_route_parser():
     )
     input_data = st.text_area("Paste your route data here", height=300, key="wave_input")
 
-    # Parse button
     if st.button("Parse", key="wave_parse"):
         routes = parse_wave_routes(input_data)
-        st.session_state['parsed_routes'] = routes  # Store in session state
+        st.session_state['parsed_routes'] = routes
 
-    # Only show parsed routes if they exist in session state
     if 'parsed_routes' in st.session_state and st.session_state['parsed_routes']:
         routes = st.session_state['parsed_routes']
         st.markdown("#### Parsed Routes (Duplicates Removed)")
@@ -339,5 +317,75 @@ def show_wave_route_parser():
     elif 'parsed_routes' in st.session_state and not st.session_state['parsed_routes']:
         st.error("No valid routes found in input data")
 
+def fiber_sheath_parser():
+    import re
+    st.header("Fiber Sheath Parser")
+    st.markdown("Paste your fiber data below (raw text, as copied):")
+    data = st.text_area("Paste fiber data here", height=400, key="fiber_data_input")
+
+    if st.button("Parse Fiber Data"):
+        if not data.strip():
+            st.warning("Please paste some data first.")
+            return
+
+        unique_sheaths = []
+        seen_sheaths = set()
+        sheath_fiber_avail = []
+
+        # For cable names with segments removed
+        cable_names = []
+        seen_cables = set()
+
+        lines = data.splitlines()
+        for i, line in enumerate(lines):
+            # Find unique sheaths
+            match = re.search(r'Sheath:\s*([^\(]+(?:\([^)]+\))?)', line)
+            if match:
+                sheath = match.group(1).strip()
+                if sheath not in seen_sheaths:
+                    unique_sheaths.append(sheath)
+                    seen_sheaths.add(sheath)
+                # Remove segment in parentheses at the end, if present
+                base_cable = re.sub(r'\s*\([^)]+\)$', '', sheath).strip()
+                if base_cable not in seen_cables:
+                    cable_names.append(base_cable)
+                    seen_cables.add(base_cable)
+            # Find "Sheath Fibers Available" (if present)
+            avail_match = re.search(r'Sheath Fibers Available\s*:\s*(\d+)', line)
+            if avail_match:
+                avail = int(avail_match.group(1))
+                # Try to find the most recent sheath above this line
+                sheath_for_avail = None
+                for j in range(i, -1, -1):
+                    m2 = re.search(r'Sheath:\s*([^\(]+(?:\([^)]+\))?)', lines[j])
+                    if m2:
+                        sheath_for_avail = m2.group(1).strip()
+                        break
+                if sheath_for_avail and avail < 20:
+                    sheath_fiber_avail.append((sheath_for_avail, avail))
+
+        # Print the simplified list first
+        st.subheader("Fiber route as described by Cable Names")
+        if cable_names:
+            for cable in cable_names:
+                st.write(f"- {cable}")
+        else:
+            st.write("No cable names found.")
+
+        # Then print the longer list
+        st.subheader("Cable path with segments")
+        if unique_sheaths:
+            for sheath in unique_sheaths:
+                st.write(f"- {sheath}")
+        else:
+            st.write("No sheaths found.")
+
+        st.subheader("Sheath Fibers Available (<20)")
+        if sheath_fiber_avail:
+            for sheath, avail in sheath_fiber_avail:
+                st.write(f"- {sheath}: {avail}")
+        else:
+            st.write("No sheaths with <20 fibers available found.")
+            
 if __name__ == "__main__":
     main()
