@@ -16,17 +16,7 @@ if 'spaces' not in st.session_state:
         'Data Processing': {
             'type': 'tool',
             'description': 'Tools for processing different types of data',
-            'tools': ['CSV Processor', 'Text Analyzer', 'Wave Route Parser', 'Fiber Sheath Parser']
-        },
-        'Medical Research': {
-            'type': 'research',
-            'description': 'Personal health research and notes',
-            'notes': []
-        },
-        'Study Notes': {
-            'type': 'research',
-            'description': 'General study and learning notes',
-            'notes': []
+            'tools': ['Wave Route Parser', 'Fiber Sheath Parser', 'CSV Processor', 'Text Analyzer']
         }
     }
 
@@ -336,35 +326,56 @@ def fiber_sheath_parser():
         cable_names = []
         seen_cables = set()
 
+        # For tracking footage
+        sheath_footage = {}  # Dictionary to store sheath -> footage
+        total_footage = 0.0  # Total footage counter
+
         lines = data.splitlines()
+        current_sheath = None  # Track the current sheath being processed
+
         for i, line in enumerate(lines):
             # Find unique sheaths
             match = re.search(r'Sheath:\s*([^\(]+(?:\([^)]+\))?)', line)
             if match:
-                sheath = match.group(1).strip()
-                if sheath not in seen_sheaths:
-                    unique_sheaths.append(sheath)
-                    seen_sheaths.add(sheath)
+                current_sheath = match.group(1).strip()
+                if current_sheath not in seen_sheaths:
+                    unique_sheaths.append(current_sheath)
+                    seen_sheaths.add(current_sheath)
+                    sheath_footage[current_sheath] = 0.0  # Initialize footage for this sheath
+
                 # Remove segment in parentheses at the end, if present
-                base_cable = re.sub(r'\s*\([^)]+\)$', '', sheath).strip()
+                base_cable = re.sub(r'\s*\([^)]+\)$', '', current_sheath).strip()
                 if base_cable not in seen_cables:
                     cable_names.append(base_cable)
                     seen_cables.add(base_cable)
+
+            # Find footage information
+            footage_match = re.search(r'(\d+\.\d+)\s+FT', line)
+            if footage_match and current_sheath:
+                footage = float(footage_match.group(1))
+                sheath_footage[current_sheath] += footage
+                total_footage += footage
+
             # Find "Sheath Fibers Available" (if present)
             avail_match = re.search(r'Sheath Fibers Available\s*:\s*(\d+)', line)
-            if avail_match:
+            if avail_match and current_sheath:
                 avail = int(avail_match.group(1))
-                # Try to find the most recent sheath above this line
-                sheath_for_avail = None
-                for j in range(i, -1, -1):
-                    m2 = re.search(r'Sheath:\s*([^\(]+(?:\([^)]+\))?)', lines[j])
-                    if m2:
-                        sheath_for_avail = m2.group(1).strip()
-                        break
-                if sheath_for_avail and avail < 20:
-                    sheath_fiber_avail.append((sheath_for_avail, avail))
+                if avail < 20:
+                    sheath_fiber_avail.append((current_sheath, avail))
 
-        # Print the simplified list first
+        # Calculate distances
+        total_miles = total_footage / 5280
+        total_km = total_footage * 0.0003048
+        estimated_optical_km = total_km * 1.13
+
+        # Display total footage first
+        st.subheader("Total Route Distance")
+        st.write(f"**{total_footage:.2f} FT**")
+        st.write(f"**{total_miles:.2f} miles**")
+        st.write(f"**{total_km:.2f} km**")
+        st.write(f"**Estimated optical distance: {estimated_optical_km:.2f} km** (13% added for slack, splices, and slack loops)")
+
+        # Print the expanded cable names section
         st.subheader("Fiber route as described by Cable Names")
         if cable_names:
             for cable in cable_names:
@@ -372,11 +383,12 @@ def fiber_sheath_parser():
         else:
             st.write("No cable names found.")
 
-        # Then print the longer list
-        st.subheader("Cable path with segments")
+        # Then print the longer list with footage, indented
+        st.subheader("Expanded Cable Route: Segment-by-Segment Breakdown:")
         if unique_sheaths:
             for sheath in unique_sheaths:
-                st.write(f"- {sheath}")
+                footage = sheath_footage.get(sheath, 0.0)
+                st.write(f"  - {sheath}: {footage:.2f} FT")
         else:
             st.write("No sheaths found.")
 
