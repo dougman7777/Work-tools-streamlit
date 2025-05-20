@@ -24,48 +24,17 @@ def main():
     # Sidebar for navigation
     st.sidebar.title("My Spaces")
 
-    # Add new space button
-    if st.sidebar.button("+ Create New Space"):
-        create_new_space()
-
-    # Space selection
-    selected_space = st.sidebar.selectbox(
-        "Select Space",
-        options=list(st.session_state.spaces.keys())
+    # Tool selection using radio buttons
+    selected_tool = st.sidebar.radio(
+        "Select Tool",
+        options=st.session_state.spaces['Data Processing']['tools']
     )
 
     # Main content area
-    st.title(selected_space)
-    st.write(st.session_state.spaces[selected_space]['description'])
+    st.title("Data Processing")
+    st.write(st.session_state.spaces['Data Processing']['description'])
 
-    # Display different content based on space type
-    if st.session_state.spaces[selected_space]['type'] == 'tool':
-        show_tool_space(selected_space)
-    else:
-        show_research_space(selected_space)
-
-def create_new_space():
-    st.sidebar.subheader("Create New Space")
-    space_name = st.sidebar.text_input("Space Name")
-    space_type = st.sidebar.selectbox("Space Type", ["tool", "research"])
-    space_description = st.sidebar.text_area("Description")
-
-    if st.sidebar.button("Create"):
-        if space_name and space_name not in st.session_state.spaces:
-            st.session_state.spaces[space_name] = {
-                'type': space_type,
-                'description': space_description,
-                'tools' if space_type == 'tool' else 'notes': [] if space_type == 'research' else ['Basic Processor']
-            }
-            st.sidebar.success(f"Created new space: {space_name}")
-
-def show_tool_space(space_name):
-    st.subheader("Available Tools")
-    selected_tool = st.selectbox(
-        "Select Tool",
-        options=st.session_state.spaces[space_name]['tools']
-    )
-
+    # Display different content based on selected tool
     if selected_tool == "CSV Processor":
         show_csv_processor()
     elif selected_tool == "Text Analyzer":
@@ -74,23 +43,6 @@ def show_tool_space(space_name):
         show_wave_route_parser()
     elif selected_tool == "Fiber Sheath Parser":
         fiber_sheath_parser()
-
-def show_research_space(space_name):
-    st.subheader("Research Notes")
-
-    # Add new note
-    new_note = st.text_area("Add New Note")
-    if st.button("Save Note"):
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        st.session_state.spaces[space_name]['notes'].append({
-            'timestamp': timestamp,
-            'content': new_note
-        })
-
-    # Display existing notes
-    for note in st.session_state.spaces[space_name]['notes']:
-        with st.expander(f"Note from {note['timestamp']}"):
-            st.write(note['content'])
 
 def show_csv_processor():
     st.subheader("CSV Processor")
@@ -376,7 +328,7 @@ def fiber_sheath_parser():
         st.write(f"**Estimated optical distance: {estimated_optical_km:.2f} km** (13% added for slack, splices, and slack loops)")
 
         # Print the expanded cable names section
-        st.subheader("Fiber route as described by Cable Names")
+        st.subheader("EXPANDED Fiber route as described by Cable Names")
         if cable_names:
             for cable in cable_names:
                 st.write(f"- {cable}")
@@ -384,7 +336,7 @@ def fiber_sheath_parser():
             st.write("No cable names found.")
 
         # Then print the longer list with footage, indented
-        st.subheader("Expanded Cable Route: Segment-by-Segment Breakdown:")
+        st.subheader("Detailed Cable Path with Individual Segments")
         if unique_sheaths:
             for sheath in unique_sheaths:
                 footage = sheath_footage.get(sheath, 0.0)
@@ -398,6 +350,6 @@ def fiber_sheath_parser():
                 st.write(f"- {sheath}: {avail}")
         else:
             st.write("No sheaths with <20 fibers available found.")
-            
+
 if __name__ == "__main__":
     main()
