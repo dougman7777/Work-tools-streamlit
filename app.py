@@ -175,7 +175,7 @@ Network Facilities:
             output.append("Network Facilities:")
             output.extend(facilities)
 
-        pythonst.text_area("Parsed Output:", "\n".join(output), height=400)
+        st.text_area("Parsed Output:", "\n".join(output), height=400)
 
 def parse_facility_id(line):
     """Parse a network facility ID into its components."""
