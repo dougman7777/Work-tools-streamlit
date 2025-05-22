@@ -16,9 +16,24 @@ if 'spaces' not in st.session_state:
         'Data Processing': {
             'type': 'tool',
             'description': 'Tools for processing different types of data',
-            'tools': ['Wave Route Parser', 'Fiber Sheath Parser', 'CSV Processor', 'Text Analyzer']
+            'tools': ['Wave Route Parser', 'Fiber Sheath Parser', 'XLR Parser']
         }
     }
+
+def extract_field(data, field_names):
+    """
+    Try to extract the value for any of the field_names from the data.
+    Returns the value or None if not found.
+    """
+    for field in field_names:
+        # Regex: field name, optional spaces, then value (until end of line)
+        match = re.search(rf"{field}\s*[:=]?\s*(.+)", data, re.IGNORECASE)
+        if match:
+            value = match.group(1).strip()
+            # If the value is just a dash or empty, skip
+            if value and value != "-":
+                return value
+    return None
 
 def main():
     # Sidebar for navigation
@@ -35,39 +50,121 @@ def main():
     st.write(st.session_state.spaces['Data Processing']['description'])
 
     # Display different content based on selected tool
-    if selected_tool == "CSV Processor":
-        show_csv_processor()
-    elif selected_tool == "Text Analyzer":
-        show_text_analyzer()
-    elif selected_tool == "Wave Route Parser":
+    if selected_tool == "Wave Route Parser":
         show_wave_route_parser()
     elif selected_tool == "Fiber Sheath Parser":
         fiber_sheath_parser()
+    elif selected_tool == "XLR Parser":
+        show_xlr_parser()
 
-def show_csv_processor():
-    st.subheader("CSV Processor")
-    uploaded_file = st.file_uploader("Upload CSV file", type=['csv'])
+def show_xlr_parser():
+    st.header("XLR Parser")
 
-    if uploaded_file is not None:
-        df = pd.read_csv(uploaded_file)
-        st.write("Preview of your data:")
-        st.dataframe(df.head())
+    # Create a sample XLR text for testing
+    sample_xlr = """Service Name: ACME-MPLS-001
+Circuit ID: CKT-12345
+Account Name: ACME Corporation
 
-        if st.button("Show Basic Statistics"):
-            st.write(df.describe())
+A-Address: 123 Main St, New York, NY 10001
+Building: F20W-123456
+OSP EB 456789
 
-def show_text_analyzer():
-    st.subheader("Text Analyzer")
-    text_input = st.text_area("Enter text to analyze")
+Z-Address: 456 Park Ave, Chicago, IL 60601
+Building: F16X-654321
+OSP EB 987654
 
-    if text_input:
-        word_count = len(text_input.split())
-        char_count = len(text_input)
+Network Facilities:
+10 /10G /NYC1/CHI1
+20 /1G /NYC2/CHI2
+"""
 
-        col1, col2 = st.columns(2)
-        col1.metric("Word Count", word_count)
-        col2.metric("Character Count", char_count)
+    if st.sidebar.button("Load Sample XLR"):
+        st.session_state.sample_xlr = sample_xlr
 
+    xlr_text = ""
+    if 'sample_xlr' in st.session_state:
+        xlr_text = st.session_state.sample_xlr
+
+    xlr_text = st.text_area("Paste XLR text here:", xlr_text, height=300)
+
+    if st.button("Parse XLR"):
+        if not xlr_text:
+            st.warning("Please paste XLR text to parse.")
+            return
+
+        # Extract fields robustly
+        service_name = extract_field(xlr_text, ["Service Name"])
+        circuit_id = extract_field(xlr_text, ["Circuit ID"])
+        account_name = extract_field(xlr_text, ["Account Name"])
+        address_a = extract_field(xlr_text, ["A-Address", "Address A"])
+        address_z = extract_field(xlr_text, ["Z-Address", "Address Z"])
+
+        # Extract city from address
+        def extract_city(address):
+            if not address:
+                return "Unknown"
+            # Look for pattern like "City Name XX" where XX is state code
+            city_match = re.search(r'([A-Za-z\s]+\s[A-Z]{2})', address)
+            if city_match:
+                return city_match.group(1).strip()
+            return "Unknown"
+
+        city_a = extract_city(address_a)
+        city_z = extract_city(address_z)
+
+        # Generalized fiber ID regex: F + 2 digits + 1 letter + - + 6+ digits
+        fiber_id_pattern = r'F\d{2}[A-Z]-\d{6,}'
+        fiber_ids = re.findall(fiber_id_pattern, xlr_text)
+        osp_eb_matches = re.findall(r'OSP EB \d+', xlr_text)
+
+        # Split fiber IDs and OSP EBs between A and Z (first half to A, second half to Z)
+        mid_fiber = len(fiber_ids) // 2
+        mid_osp = len(osp_eb_matches) // 2
+
+        fiber_a = fiber_ids[:mid_fiber] if fiber_ids else []
+        fiber_z = fiber_ids[mid_fiber:] if fiber_ids else []
+
+        osp_eb_a = osp_eb_matches[:mid_osp] if osp_eb_matches else []
+        osp_eb_z = osp_eb_matches[mid_osp:] if osp_eb_matches else []
+
+        # Output formatting
+        output = []
+        output.append(f"Service Name  =   {service_name or 'Not found'}")
+        output.append(f"Circuit ID   =   {circuit_id or 'Not found'}")
+        output.append(f"Account Name =  {account_name or 'Not found'}")
+        output.append("")
+        output.append(f"Address A  =  {address_a or 'Not found'}")
+        output.append(f"OSP = ")
+        if fiber_a or osp_eb_a:
+            for item in fiber_a:
+                output.append(item)
+            for item in osp_eb_a:
+                output.append(item)
+        else:
+            output.append("Not found")
+        output.append("")
+        output.append(f"Address Z =  {address_z or 'Not found'}")
+        output.append(f"OSP = ")
+        if fiber_z or osp_eb_z:
+            for item in fiber_z:
+                output.append(item)
+            for item in osp_eb_z:
+                output.append(item)
+        else:
+            output.append("Not found")
+        output.append("")
+
+        # Network Facilities: find lines that look like "number /something /something/something"
+        facilities = []
+        for line in xlr_text.splitlines():
+            if re.match(r"\d+\s+/\S+", line.strip()):
+                facilities.append(line.strip())
+        if facilities:
+            output.append("Network Facilities:")
+            output.extend(facilities)
+
+        st.text_area("Parsed Output:", "\n".join(output), height=400)
+        
 def parse_facility_id(line):
     """Parse a network facility ID into its components."""
     match = re.search(r'(\d+)\s+(/FIBER\w+/[A-Z0-9]+/[A-Z0-9]+)', line)
@@ -263,93 +360,97 @@ def fiber_sheath_parser():
     import re
     st.header("Fiber Sheath Parser")
     st.markdown("Paste your fiber data below (raw text, as copied):")
-    data = st.text_area("Paste fiber data here", height=400, key="fiber_data_input")
 
-    if st.button("Parse Fiber Data"):
-        if not data.strip():
-            st.warning("Please paste some data first.")
-            return
+    # Wrap the text_area and button in a form
+    with st.form(key="fiber_form"):
+        data = st.text_area("Paste fiber data here", height=400, key="fiber_data_input")
+        submitted = st.form_submit_button("Parse Fiber Data")
 
-        unique_sheaths = []
-        seen_sheaths = set()
-        sheath_fiber_avail = []
+        if submitted:
+            if not data.strip():
+                st.warning("Please paste some data first.")
+                return
 
-        # For cable names with segments removed
-        cable_names = []
-        seen_cables = set()
+            unique_sheaths = []
+            seen_sheaths = set()
+            sheath_fiber_avail = []
 
-        # For tracking footage
-        sheath_footage = {}  # Dictionary to store sheath -> footage
-        total_footage = 0.0  # Total footage counter
+            # For cable names with segments removed
+            cable_names = []
+            seen_cables = set()
 
-        lines = data.splitlines()
-        current_sheath = None  # Track the current sheath being processed
+            # For tracking footage
+            sheath_footage = {}  # Dictionary to store sheath -> footage
+            total_footage = 0.0  # Total footage counter
 
-        for i, line in enumerate(lines):
-            # Find unique sheaths
-            match = re.search(r'Sheath:\s*([^\(]+(?:\([^)]+\))?)', line)
-            if match:
-                current_sheath = match.group(1).strip()
-                if current_sheath not in seen_sheaths:
-                    unique_sheaths.append(current_sheath)
-                    seen_sheaths.add(current_sheath)
-                    sheath_footage[current_sheath] = 0.0  # Initialize footage for this sheath
+            lines = data.splitlines()
+            current_sheath = None  # Track the current sheath being processed
 
-                # Remove segment in parentheses at the end, if present
-                base_cable = re.sub(r'\s*\([^)]+\)$', '', current_sheath).strip()
-                if base_cable not in seen_cables:
-                    cable_names.append(base_cable)
-                    seen_cables.add(base_cable)
+            for i, line in enumerate(lines):
+                # Find unique sheaths
+                match = re.search(r'Sheath:\s*([^\(]+(?:\([^)]+\))?)', line)
+                if match:
+                    current_sheath = match.group(1).strip()
+                    if current_sheath not in seen_sheaths:
+                        unique_sheaths.append(current_sheath)
+                        seen_sheaths.add(current_sheath)
+                        sheath_footage[current_sheath] = 0.0  # Initialize footage for this sheath
 
-            # Find footage information
-            footage_match = re.search(r'(\d+\.\d+)\s+FT', line)
-            if footage_match and current_sheath:
-                footage = float(footage_match.group(1))
-                sheath_footage[current_sheath] += footage
-                total_footage += footage
+                    # Remove segment in parentheses at the end, if present
+                    base_cable = re.sub(r'\s*\([^)]+\)$', '', current_sheath).strip()
+                    if base_cable not in seen_cables:
+                        cable_names.append(base_cable)
+                        seen_cables.add(base_cable)
 
-            # Find "Sheath Fibers Available" (if present)
-            avail_match = re.search(r'Sheath Fibers Available\s*:\s*(\d+)', line)
-            if avail_match and current_sheath:
-                avail = int(avail_match.group(1))
-                if avail < 20:
-                    sheath_fiber_avail.append((current_sheath, avail))
+                # Find footage information
+                footage_match = re.search(r'(\d+\.\d+)\s+FT', line)
+                if footage_match and current_sheath:
+                    footage = float(footage_match.group(1))
+                    sheath_footage[current_sheath] += footage
+                    total_footage += footage
 
-        # Calculate distances
-        total_miles = total_footage / 5280
-        total_km = total_footage * 0.0003048
-        estimated_optical_km = total_km * 1.13
+                # Find "Sheath Fibers Available" (if present)
+                avail_match = re.search(r'Sheath Fibers Available\s*:\s*(\d+)', line)
+                if avail_match and current_sheath:
+                    avail = int(avail_match.group(1))
+                    if avail < 20:
+                        sheath_fiber_avail.append((current_sheath, avail))
 
-        # Display total footage first
-        st.subheader("Total Route Distance")
-        st.write(f"**{total_footage:.2f} FT**")
-        st.write(f"**{total_miles:.2f} miles**")
-        st.write(f"**{total_km:.2f} km**")
-        st.write(f"**Estimated optical distance: {estimated_optical_km:.2f} km** (13% added for slack, splices, and slack loops)")
+            # Calculate distances
+            total_miles = total_footage / 5280
+            total_km = total_footage * 0.0003048
+            estimated_optical_km = total_km * 1.13
 
-        # Print the expanded cable names section
-        st.subheader("EXPANDED Fiber route as described by Cable Names")
-        if cable_names:
-            for cable in cable_names:
-                st.write(f"- {cable}")
-        else:
-            st.write("No cable names found.")
+            # Display total footage first
+            st.subheader("Total Route Distance")
+            st.markdown(f"<p style='color:blue'>Total Footage: <b>{total_footage:.2f} FT</b></p>", unsafe_allow_html=True)
+            st.markdown(f"<p style='color:green'>Total Miles: <b>{total_miles:.2f} miles</b></p>", unsafe_allow_html=True)
+            st.markdown(f"<p style='color:purple'>Total Kilometers: <b>{total_km:.2f} km</b></p>", unsafe_allow_html=True)
+            st.markdown(f"Estimated optical distance: <b>{estimated_optical_km:.2f} km</b> <span style='color:red'>(13% added for slack, splices, and slack loops)</span>", unsafe_allow_html=True)
 
-        # Then print the longer list with footage, indented
-        st.subheader("Detailed Cable Path with Individual Segments")
-        if unique_sheaths:
-            for sheath in unique_sheaths:
-                footage = sheath_footage.get(sheath, 0.0)
-                st.write(f"  - {sheath}: {footage:.2f} FT")
-        else:
-            st.write("No sheaths found.")
+            # Print the expanded cable names section
+            st.subheader("EXPANDED Fiber route as described by Cable Names")
+            if cable_names:
+                for cable in cable_names:
+                    st.write(f"- {cable}")
+            else:
+                st.write("No cable names found.")
 
-        st.subheader("Sheath Fibers Available (<20)")
-        if sheath_fiber_avail:
-            for sheath, avail in sheath_fiber_avail:
-                st.write(f"- {sheath}: {avail}")
-        else:
-            st.write("No sheaths with <20 fibers available found.")
+            # Then print the longer list with footage, indented
+            st.subheader("Detailed Cable Path with Individual Segments")
+            if unique_sheaths:
+                for sheath in unique_sheaths:
+                    footage = sheath_footage.get(sheath, 0.0)
+                    st.write(f"  - {sheath}: {footage:.2f} FT")
+            else:
+                st.write("No sheaths found.")
+
+            st.subheader("Sheath Fibers Available (<20)")
+            if sheath_fiber_avail:
+                for sheath, avail in sheath_fiber_avail:
+                    st.write(f"- {sheath}: {avail}")
+            else:
+                st.write("No sheaths with <20 fibers available found.")
 
 if __name__ == "__main__":
     main()
