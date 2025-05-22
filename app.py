@@ -60,6 +60,18 @@ def main():
 def show_xlr_parser():
     st.header("XLR Parser")
 
+    description = """
+    The tool will extract Service Name, Circuit ID, Account Name, A/Z Locations, and Network Facilities.
+
+    To use the XLR Parser:
+
+    1.  In ZDAF (Circuit Design Viewer), enter your Circuit ID.
+    2.  Navigate to the XLR Data tab.
+    3.  Copy all the data displayed on the screen (Ctrl+A, Ctrl+C).
+    4.  Paste the copied data into the XLR Parser tool.
+    """
+    st.markdown(description)
+
     # Create a sample XLR text for testing
     sample_xlr = """Service Name: ACME-MPLS-001
 Circuit ID: CKT-12345
@@ -163,8 +175,9 @@ Network Facilities:
             output.append("Network Facilities:")
             output.extend(facilities)
 
-        st.text_area("Parsed Output:", "\n".join(output), height=400)
-        
+        st.text_area("Parsed Output:", "
+".join(output), height=400)
+
 def parse_facility_id(line):
     """Parse a network facility ID into its components."""
     match = re.search(r'(\d+)\s+(/FIBER\w+/[A-Z0-9]+/[A-Z0-9]+)', line)
@@ -330,6 +343,19 @@ def build_wave_path(output1, start_loc):
 
 def show_wave_route_parser():
     st.subheader("Wave Route Parser")
+
+    description = """
+    The tool extracts fiber route details from ZDAF's Waves Design Tool. It generates an ordered list of the Fiber facilities on your route for a COR form.
+
+    To use the Wave Route Parser:
+
+    1.  In ZDAF, design a wave route and click the 'Fiber' radio button.
+    2.  Copy the displayed fiber data.
+    3.  Paste the data into the Wave Route Parser.
+    4.  Enter a starting CLLI to generate the ordered facility list.
+    """
+    st.markdown(description)
+
     st.markdown(
         "Paste your route data below. After parsing, you'll be prompted for a starting location to build the continuous path."
     )
@@ -359,6 +385,19 @@ def show_wave_route_parser():
 def fiber_sheath_parser():
     import re
     st.header("Fiber Sheath Parser")
+
+    description = """
+    The tool extracts fiber route details from IQGeo. It returns fiber cables, overall distance, cable segments, and segments with fewer than 20 fibers available.
+
+    To use the Fiber Sheath Parser:
+
+    1.  In IQGeo, find a PRM route.
+    2.  Click 'Fiber Propagations' and then the grid icon.
+    3.  Copy all the data.
+    4.  Paste the data into the Fiber Sheath Parser.
+    """
+    st.markdown(description)
+
     st.markdown("Paste your fiber data below (raw text, as copied):")
 
     # Wrap the text_area and button in a form
