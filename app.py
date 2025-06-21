@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import re
+from io import StringIO
 
 # Set page config
 st.set_page_config(
@@ -60,122 +61,109 @@ def main():
 def show_xlr_parser():
     st.header("XLR Parser")
 
-    description = """
-    The tool will extract Service Name, Circuit ID, Account Name, A/Z Locations, and Network Facilities.
+    # Initialize session state for multiple XLR parses
+    if "xlr_history" not in st.session_state:
+        st.session_state.xlr_history = []
 
-    To use the XLR Parser:
+    # Show all previous parses
+    for idx, (input_text, output_text) in enumerate(st.session_state.xlr_history):
+        st.subheader(f"XLR Parse #{idx+1}")
+        st.text_area(f"Input #{idx+1}", input_text, height=150, key=f"xlr_input_{idx}", disabled=True)
+        st.code(output_text, language="text")
+        st.divider()
 
-    1.  In ZDAF (Circuit Design Viewer), enter your Circuit ID.
-    2.  Navigate to the XLR Data tab.
-    3.  Copy all the data displayed on the screen (Ctrl+A, Ctrl+C).
-    4.  Paste the copied data into the XLR Parser tool.
-    """
-    st.markdown(description)
+    # New input box at the bottom
+    with st.form(key=f"xlr_form_{len(st.session_state.xlr_history)}"):
+        xlr_text = st.text_area("Paste XLR text here:", height=300, key=f"xlr_input_new_{len(st.session_state.xlr_history)}")
+        submitted = st.form_submit_button("Parse XLR")
+        if submitted and xlr_text.strip():
+            fields_to_extract = [
+                "Service Name", "Circuit ID", "Account Name",
+                "Product Group", "Product", "Product Category", "Rate Code",
+                "A-Clli", "A-Address", "Z-Clli", "Z-Address"
+            ]
+            extracted = {field: "Not found" for field in fields_to_extract}
+            for line in xlr_text.splitlines():
+                for field in fields_to_extract:
+                    if line.startswith(field + "\t"):
+                        parts = line.split('\t', 1)
+                        if len(parts) > 1:
+                            extracted[field] = parts[1].strip()
+            a_clli = extracted.get("A-Clli", "").strip()
+            z_clli = extracted.get("Z-Clli", "").strip()
 
-    # Create a sample XLR text for testing
-    sample_xlr = """Service Name: ACME-MPLS-001
-Circuit ID: CKT-12345
-Account Name: ACME Corporation
+            # Find the table header and parse the table
+            lines = xlr_text.splitlines()
+            table_start = None
+            for i, line in enumerate(lines):
+                if (
+                    "CLLI" in line and "Address" in line
+                    and line.count('\t') > 2
+                ):
+                    table_start = i
+                    break
 
-A-Address: 123 Main St, New York, NY 10001
-Building: F20W-123456
-OSP EB 456789
+            clli_to_address = {}
+            if table_start is not None:
+                table_text = "\n".join(lines[table_start:])
+                try:
+                    df = pd.read_csv(
+                        StringIO(table_text),
+                        sep='\t',
+                        dtype=str,
+                        on_bad_lines='skip',
+                        skip_blank_lines=True
+                    )
+                    df.columns = df.columns.str.strip()
+                    if "CLLI" in df.columns and "Address" in df.columns:
+                        for clli, addr in zip(df["CLLI"], df["Address"]):
+                            if pd.notna(clli) and pd.notna(addr) and addr.strip():
+                                clli_to_address[clli.strip()] = addr.strip()
+                except Exception as e:
+                    pass
 
-Z-Address: 456 Park Ave, Chicago, IL 60601
-Building: F16X-654321
-OSP EB 987654
+            def fuzzy_lookup_first(base_clli):
+                for clli, addr in clli_to_address.items():
+                    if clli.startswith(base_clli):
+                        return addr
+                return "Not found"
 
-Network Facilities:
-10 /10G /NYC1/CHI1
-20 /1G /NYC2/CHI2
-"""
+            address_a = fuzzy_lookup_first(a_clli) if a_clli else "Not found"
+            address_z = fuzzy_lookup_first(z_clli) if z_clli else "Not found"
 
-    if st.sidebar.button("Load Sample XLR"):
-        st.session_state.sample_xlr = sample_xlr
+            # Network Facilities Extraction
+            facilities = []
+            facility_pattern = re.compile(
+                r'([A-Z0-9]+)?\s*/([0-9A-Z]+(?:G|FIBER))\s*/([A-Z0-9]+)/([A-Z0-9]+)', re.IGNORECASE)
+            for line in xlr_text.splitlines():
+                m = facility_pattern.search(line)
+                if m:
+                    facilities.append(f"{m.group(1) or ''} /{m.group(2)} /{m.group(3)}/{m.group(4)}".strip())
 
-    xlr_text = ""
-    if 'sample_xlr' in st.session_state:
-        xlr_text = st.session_state.sample_xlr
+            # Output
+            output = []
+            output.append("=== Key Fields ===")
+            output.append(f"Service Name: {extracted['Service Name']}")
+            output.append(f"Circuit ID: {extracted['Circuit ID']}")
+            output.append(f"Account Name: {extracted['Account Name']}")
+            product_summary = f"{extracted['Rate Code']} {extracted['Product']}".replace("Standard Wavelength", "Wavelength").strip()
+            output.append(f"Product: {product_summary}")
+            output.append(f"A-Clli: {extracted['A-Clli']}")
+            output.append(f"A-Address: {extracted['A-Address']}")
+            output.append(f"Z-Clli: {extracted['Z-Clli']}")
+            output.append(f"Z-Address: {extracted['Z-Address']}")
+            output.append("")
+            output.append(f"Street Address for A-Clli ({a_clli}): {address_a}")
+            output.append(f"Street Address for Z-Clli ({z_clli}): {address_z}")
+            output.append("")
+            if facilities:
+                output.append("=== Network Facilities ===")
+                output.extend(facilities)
 
-    xlr_text = st.text_area("Paste XLR text here:", xlr_text, height=300)
-
-    if st.button("Parse XLR"):
-        if not xlr_text:
-            st.warning("Please paste XLR text to parse.")
-            return
-
-        # Extract fields robustly
-        service_name = extract_field(xlr_text, ["Service Name"])
-        circuit_id = extract_field(xlr_text, ["Circuit ID"])
-        account_name = extract_field(xlr_text, ["Account Name"])
-        address_a = extract_field(xlr_text, ["A-Address", "Address A"])
-        address_z = extract_field(xlr_text, ["Z-Address", "Address Z"])
-
-        # Extract city from address
-        def extract_city(address):
-            if not address:
-                return "Unknown"
-            # Look for pattern like "City Name XX" where XX is state code
-            city_match = re.search(r'([A-Za-z\s]+\s[A-Z]{2})', address)
-            if city_match:
-                return city_match.group(1).strip()
-            return "Unknown"
-
-        city_a = extract_city(address_a)
-        city_z = extract_city(address_z)
-
-        # Generalized fiber ID regex: F + 2 digits + 1 letter + - + 6+ digits
-        fiber_id_pattern = r'F\d{2}[A-Z]-\d{6,}'
-        fiber_ids = re.findall(fiber_id_pattern, xlr_text)
-        osp_eb_matches = re.findall(r'OSP EB \d+', xlr_text)
-
-        # Split fiber IDs and OSP EBs between A and Z (first half to A, second half to Z)
-        mid_fiber = len(fiber_ids) // 2
-        mid_osp = len(osp_eb_matches) // 2
-
-        fiber_a = fiber_ids[:mid_fiber] if fiber_ids else []
-        fiber_z = fiber_ids[mid_fiber:] if fiber_ids else []
-
-        osp_eb_a = osp_eb_matches[:mid_osp] if osp_eb_matches else []
-        osp_eb_z = osp_eb_matches[mid_osp:] if osp_eb_matches else []
-
-        # Output formatting
-        output = []
-        output.append(f"Service Name  =   {service_name or 'Not found'}")
-        output.append(f"Circuit ID   =   {circuit_id or 'Not found'}")
-        output.append(f"Account Name =  {account_name or 'Not found'}")
-        output.append("")
-        output.append(f"Address A  =  {address_a or 'Not found'}")
-        output.append(f"OSP = ")
-        if fiber_a or osp_eb_a:
-            for item in fiber_a:
-                output.append(item)
-            for item in osp_eb_a:
-                output.append(item)
-        else:
-            output.append("Not found")
-        output.append("")
-        output.append(f"Address Z =  {address_z or 'Not found'}")
-        output.append(f"OSP = ")
-        if fiber_z or osp_eb_z:
-            for item in fiber_z:
-                output.append(item)
-            for item in osp_eb_z:
-                output.append(item)
-        else:
-            output.append("Not found")
-        output.append("")
-
-        # Network Facilities: find lines that look like "number /something /something/something"
-        facilities = []
-        for line in xlr_text.splitlines():
-            if re.match(r"\d+\s+/\S+", line.strip()):
-                facilities.append(line.strip())
-        if facilities:
-            output.append("Network Facilities:")
-            output.extend(facilities)
-
-        st.text_area("Parsed Output:", "\n".join(output), height=400)
+            result = "\n".join(output)
+            # Save this input/output pair to session state
+            st.session_state.xlr_history.append((xlr_text, result))
+            st.rerun()
 
 def parse_facility_id(line):
     """Parse a network facility ID into its components."""
@@ -343,6 +331,10 @@ def build_wave_path(output1, start_loc):
 def show_wave_route_parser():
     st.subheader("Wave Route Parser")
 
+    # Initialize session state for multiple wave parses
+    if "wave_history" not in st.session_state:
+        st.session_state.wave_history = []
+
     description = """
     The tool extracts fiber route details from ZDAF's Waves Design Tool. It generates an ordered list of the Fiber facilities on your route for a COR form.
 
@@ -355,35 +347,75 @@ def show_wave_route_parser():
     """
     st.markdown(description)
 
-    st.markdown(
-        "Paste your route data below. After parsing, you'll be prompted for a starting location to build the continuous path."
-    )
-    input_data = st.text_area("Paste your route data here", height=300, key="wave_input")
+    # Show all previous parses
+    for idx, (input_text, parsed_routes, start_loc, path_result, summary) in enumerate(st.session_state.wave_history):
+        st.subheader(f"Wave Parse #{idx+1}")
+        st.text_area(f"Input #{idx+1}", input_text, height=150, key=f"wave_input_{idx}", disabled=True)
+        
+        if parsed_routes:
+            st.markdown("#### Parsed Routes (Duplicates Removed)")
+            routes_text = "\n".join(parsed_routes)
+            st.text_area(f"Parsed Routes #{idx+1}", routes_text, height=200, key=f"wave_parsed_{idx}", disabled=True)
+            
+            if start_loc and path_result:
+                st.markdown(f"#### Starting Location: {start_loc}")
+                st.markdown("#### Continuous Path with System Changes")
+                path_text = "\n".join(path_result)
+                st.text_area(f"Path #{idx+1}", path_text, height=300, key=f"wave_path_{idx}", disabled=True)
+                st.markdown("#### Summary")
+                st.text(summary)
+        st.divider()
 
-    if st.button("Parse", key="wave_parse"):
-        routes = parse_wave_routes(input_data)
-        st.session_state['parsed_routes'] = routes
+    # New input section
+    st.markdown("Paste your route data below. After parsing, you'll be prompted for a starting location to build the continuous path.")
+    
+    with st.form(key=f"wave_form_{len(st.session_state.wave_history)}"):
+        input_data = st.text_area("Paste your route data here", height=300, key=f"wave_input_new_{len(st.session_state.wave_history)}")
+        parse_submitted = st.form_submit_button("Parse")
+        if parse_submitted and input_data.strip():
+            routes = parse_wave_routes(input_data)
+            if routes:
+                # Store the parsed routes temporarily
+                st.session_state['temp_wave_data'] = {
+                    'input': input_data,
+                    'routes': routes
+                }
+                st.rerun()
+            else:
+                st.error("No valid routes found in input data")
 
-    if 'parsed_routes' in st.session_state and st.session_state['parsed_routes']:
-        routes = st.session_state['parsed_routes']
+    # If we have temporary parsed data, show it and ask for starting location
+    if 'temp_wave_data' in st.session_state:
+        temp_data = st.session_state['temp_wave_data']
         st.markdown("#### Parsed Routes (Duplicates Removed)")
-        for route in routes:
+        for route in temp_data['routes']:
             st.text(route)
 
-        start_loc = st.text_input("Enter starting location code (8 characters)", key="wave_start_loc")
-        if start_loc:
-            path, changes, summary = build_wave_path(routes, start_loc)
-            st.markdown("#### Continuous Path with System Changes")
-            for line in path:
-                st.text(line)
-            st.markdown("#### Summary")
-            st.text(summary)
-    elif 'parsed_routes' in st.session_state and not st.session_state['parsed_routes']:
-        st.error("No valid routes found in input data")
+        with st.form(key=f"wave_start_form_{len(st.session_state.wave_history)}"):
+            start_loc = st.text_input("Enter starting location code (8 characters)", key=f"wave_start_new_{len(st.session_state.wave_history)}")
+            start_submitted = st.form_submit_button("Build Path")
+            if start_submitted and start_loc:
+                path, changes, summary = build_wave_path(temp_data['routes'], start_loc)
+                
+                # Save to history
+                st.session_state.wave_history.append((
+                    temp_data['input'],
+                    temp_data['routes'],
+                    start_loc,
+                    path,
+                    summary
+                ))
+                
+                # Clear temporary data
+                del st.session_state['temp_wave_data']
+                st.rerun()
 
 def fiber_sheath_parser():
-    import re
     st.header("Fiber Sheath Parser")
+
+    # Initialize session state for multiple fiber parses
+    if "fiber_history" not in st.session_state:
+        st.session_state.fiber_history = []
 
     description = """
     The tool extracts fiber route details from IQGeo. It returns fiber cables, overall distance, cable segments, and segments with fewer than 20 fibers available.
@@ -397,98 +429,101 @@ def fiber_sheath_parser():
     """
     st.markdown(description)
 
+    # Show all previous parses
+    for idx, (input_text, result_data) in enumerate(st.session_state.fiber_history):
+        st.subheader(f"Fiber Parse #{idx+1}")
+        st.text_area(f"Input #{idx+1}", input_text, height=150, key=f"fiber_input_{idx}", disabled=True)
+        
+        # Display the results
+        st.subheader("Total Route Distance")
+        st.markdown(f"<p style='color:blue'>Total Footage: <b>{result_data['total_footage']:.2f} FT</b></p>", unsafe_allow_html=True)
+        st.markdown(f"<p style='color:green'>Total Miles: <b>{result_data['total_miles']:.2f} miles</b></p>", unsafe_allow_html=True)
+        st.markdown(f"<p style='color:purple'>Total Kilometers: <b>{result_data['total_km']:.2f} km</b></p>", unsafe_allow_html=True)
+        st.markdown(f"Estimated optical distance: <b>{result_data['estimated_optical_km']:.2f} km</b> <span style='color:red'>(13% added for slack, splices, and slack loops)</span>", unsafe_allow_html=True)
+
+        st.subheader("EXPANDED Fiber route as described by Cable Names")
+        if result_data['cable_names']:
+            for cable in result_data['cable_names']:
+                st.write(f"- {cable}")
+        else:
+            st.write("No cable names found.")
+
+        st.subheader("Detailed Cable Path with Individual Segments")
+        if result_data['unique_sheaths']:
+            for sheath, footage in result_data['sheath_footage'].items():
+                st.write(f"  - {sheath}: {footage:.2f} FT")
+        else:
+            st.write("No sheaths found.")
+
+        st.subheader("Sheath Fibers Available (<20)")
+        if result_data['sheath_fiber_avail']:
+            for sheath, avail in result_data['sheath_fiber_avail']:
+                st.write(f"- {sheath}: {avail}")
+        else:
+            st.write("No sheaths with <20 fibers available found.")
+        
+        st.divider()
+
     st.markdown("Paste your fiber data below (raw text, as copied):")
 
-    # Wrap the text_area and button in a form
-    with st.form(key="fiber_form"):
-        data = st.text_area("Paste fiber data here", height=400, key="fiber_data_input")
+    # New input form
+    with st.form(key=f"fiber_form_{len(st.session_state.fiber_history)}"):
+        data = st.text_area("Paste fiber data here", height=400, key=f"fiber_data_input_{len(st.session_state.fiber_history)}")
         submitted = st.form_submit_button("Parse Fiber Data")
 
-        if submitted:
-            if not data.strip():
-                st.warning("Please paste some data first.")
-                return
-
+        if submitted and data.strip():
             unique_sheaths = []
             seen_sheaths = set()
             sheath_fiber_avail = []
-
-            # For cable names with segments removed
             cable_names = []
             seen_cables = set()
-
-            # For tracking footage
-            sheath_footage = {}  # Dictionary to store sheath -> footage
-            total_footage = 0.0  # Total footage counter
-
+            sheath_footage = {}
+            total_footage = 0.0
             lines = data.splitlines()
-            current_sheath = None  # Track the current sheath being processed
+            current_sheath = None
 
             for i, line in enumerate(lines):
-                # Find unique sheaths
                 match = re.search(r'Sheath:\s*([^\(]+(?:\([^)]+\))?)', line)
                 if match:
                     current_sheath = match.group(1).strip()
                     if current_sheath not in seen_sheaths:
                         unique_sheaths.append(current_sheath)
                         seen_sheaths.add(current_sheath)
-                        sheath_footage[current_sheath] = 0.0  # Initialize footage for this sheath
-
-                    # Remove segment in parentheses at the end, if present
+                        sheath_footage[current_sheath] = 0.0
                     base_cable = re.sub(r'\s*\([^)]+\)$', '', current_sheath).strip()
                     if base_cable not in seen_cables:
                         cable_names.append(base_cable)
                         seen_cables.add(base_cable)
-
-                # Find footage information
                 footage_match = re.search(r'(\d+\.\d+)\s+FT', line)
                 if footage_match and current_sheath:
                     footage = float(footage_match.group(1))
                     sheath_footage[current_sheath] += footage
                     total_footage += footage
-
-                # Find "Sheath Fibers Available" (if present)
                 avail_match = re.search(r'Sheath Fibers Available\s*:\s*(\d+)', line)
                 if avail_match and current_sheath:
                     avail = int(avail_match.group(1))
                     if avail < 20:
                         sheath_fiber_avail.append((current_sheath, avail))
 
-            # Calculate distances
             total_miles = total_footage / 5280
             total_km = total_footage * 0.0003048
             estimated_optical_km = total_km * 1.13
 
-            # Display total footage first
-            st.subheader("Total Route Distance")
-            st.markdown(f"<p style='color:blue'>Total Footage: <b>{total_footage:.2f} FT</b></p>", unsafe_allow_html=True)
-            st.markdown(f"<p style='color:green'>Total Miles: <b>{total_miles:.2f} miles</b></p>", unsafe_allow_html=True)
-            st.markdown(f"<p style='color:purple'>Total Kilometers: <b>{total_km:.2f} km</b></p>", unsafe_allow_html=True)
-            st.markdown(f"Estimated optical distance: <b>{estimated_optical_km:.2f} km</b> <span style='color:red'>(13% added for slack, splices, and slack loops)</span>", unsafe_allow_html=True)
+            # Store results
+            result_data = {
+                'total_footage': total_footage,
+                'total_miles': total_miles,
+                'total_km': total_km,
+                'estimated_optical_km': estimated_optical_km,
+                'cable_names': cable_names,
+                'unique_sheaths': unique_sheaths,
+                'sheath_footage': sheath_footage,
+                'sheath_fiber_avail': sheath_fiber_avail
+            }
 
-            # Print the expanded cable names section
-            st.subheader("EXPANDED Fiber route as described by Cable Names")
-            if cable_names:
-                for cable in cable_names:
-                    st.write(f"- {cable}")
-            else:
-                st.write("No cable names found.")
-
-            # Then print the longer list with footage, indented
-            st.subheader("Detailed Cable Path with Individual Segments")
-            if unique_sheaths:
-                for sheath in unique_sheaths:
-                    footage = sheath_footage.get(sheath, 0.0)
-                    st.write(f"  - {sheath}: {footage:.2f} FT")
-            else:
-                st.write("No sheaths found.")
-
-            st.subheader("Sheath Fibers Available (<20)")
-            if sheath_fiber_avail:
-                for sheath, avail in sheath_fiber_avail:
-                    st.write(f"- {sheath}: {avail}")
-            else:
-                st.write("No sheaths with <20 fibers available found.")
+            # Save to history
+            st.session_state.fiber_history.append((data, result_data))
+            st.rerun()
 
 if __name__ == "__main__":
     main()
