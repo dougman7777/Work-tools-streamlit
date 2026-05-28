@@ -1,4 +1,45 @@
 import streamlit as st
+st.set_page_config(page_title="KMZ Length Cleaner", layout="wide")
+
+st.markdown("""
+<style>
+.main {
+    background: #f7f9fc;
+}
+
+.block-container {
+    padding-top: 2rem;
+    padding-bottom: 2rem;
+    max-width: 1200px;
+}
+
+.hero {
+    background: linear-gradient(135deg, #1f4e79, #2f80ed);
+    color: white;
+    padding: 2rem;
+    border-radius: 18px;
+    margin-bottom: 1.5rem;
+}
+
+.hero h1 {
+    margin-bottom: 0.25rem;
+}
+
+.card {
+    background: white;
+    padding: 1.25rem;
+    border-radius: 16px;
+    border: 1px solid #e6eaf0;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.06);
+    margin-bottom: 1rem;
+}
+
+.small-muted {
+    color: #667085;
+    font-size: 0.95rem;
+}
+</style>
+""", unsafe_allow_html=True)
 import zipfile
 import tempfile
 import os
@@ -9,11 +50,20 @@ import xml.etree.ElementTree as ET
 from io import BytesIO
 
 
-st.set_page_config(page_title="KMZ Length Cleaner", layout="wide")
 
-st.title("KMZ Length Cleaner")
-st.write("Upload a KMZ/KML, extract entered footage from placemark descriptions, calculate actual geometry length, and download cleaned outputs.")
+st.markdown("""
+<div class="hero">
+    <h1>KMZ Length Cleaner</h1>
+    <p>Extract entered footage from placemark descriptions, calculate true coordinate geometry length, and export cleaned KML/KMZ files.</p>
+</div>
+""", unsafe_allow_html=True)
 
+st.markdown("""
+<div class="card">
+    <h3>Upload KMZ or KML</h3>
+    <p class="small-muted">The tool reads placemarks, extracts distance text, calculates geometry length, and compares both values.</p>
+</div>
+""", unsafe_allow_html=True)
 
 def haversine_ft(lon1, lat1, lon2, lat2):
     r_ft = 20925524.9
