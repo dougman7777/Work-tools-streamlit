@@ -1,5 +1,5 @@
 import streamlit as st
-st.set_page_config(page_title="KMZ Length Cleaner", layout="wide")
+st.set_page_config(page_title="Fiberco KMZ Length Cleaner", layout="wide")
 
 st.markdown("""
 <style>
@@ -53,7 +53,7 @@ from io import BytesIO
 
 st.markdown("""
 <div class="hero">
-    <h1>KMZ Length Cleaner</h1>
+    <h1>Fiberco KMZ Length Cleaner</h1>
     <p>Extract entered footage from placemark descriptions, calculate true coordinate geometry length, and export cleaned KML/KMZ files.</p>
 </div>
 """, unsafe_allow_html=True)
